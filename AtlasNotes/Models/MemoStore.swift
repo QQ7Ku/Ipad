@@ -125,7 +125,7 @@ final class MemoStore {
                 return nil
             }
             let count = memos.filter { calendar.isDate($0.updatedAt, inSameDayAs: date) }.count
-            return DailyActivity(id: date, count: count)
+            return DailyActivity(date: date, count: count)
         }
     }
 
@@ -192,8 +192,10 @@ struct NotebookStat: Identifiable {
 }
 
 struct DailyActivity: Identifiable {
-    let id: Date
+    let date: Date
     let count: Int
+
+    var id: Date { date }
 }
 
 struct TagStat: Identifiable {
