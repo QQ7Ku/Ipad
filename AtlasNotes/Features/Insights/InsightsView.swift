@@ -23,15 +23,9 @@ struct InsightsView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("写作洞察")
-                .font(.system(size: 36, weight: .bold, design: .serif))
-                .foregroundStyle(AppTheme.ink)
-
-            Text("从笔记本、更新频率与标签三个维度，观察你的写作节奏。")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
+        Text("从笔记本、更新频率与标签三个维度，观察你的写作节奏。")
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
     }
 
     private var statGrid: some View {

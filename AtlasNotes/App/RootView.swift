@@ -6,17 +6,30 @@ struct RootView: View {
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columnVisibility) {
-            SidebarView()
-                .navigationSplitViewColumnWidth(min: 240, ideal: 272, max: 320)
-        } content: {
-            NoteListView()
-                .navigationSplitViewColumnWidth(min: 320, ideal: 372, max: 440)
-        } detail: {
-            detailColumn
+        GeometryReader { proxy in
+            NavigationSplitView(columnVisibility: $columnVisibility) {
+                SidebarView()
+                    .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 300)
+            } content: {
+                NoteListView()
+                    .navigationSplitViewColumnWidth(min: 300, ideal: 350, max: 420)
+            } detail: {
+                detailColumn
+            }
+            .navigationSplitViewStyle(.balanced)
+            .background(AppTheme.canvas)
+            .onAppear {
+                updateColumns(for: proxy.size.width)
+            }
+            .onChange(of: proxy.size.width) { _, width in
+                updateColumns(for: width)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
-        .background(AppTheme.canvas)
+    }
+
+    /// 竖屏/窄分屏隐藏侧边栏，只保留列表 + 详情，避免详情栏被压到不可读。
+    private func updateColumns(for width: CGFloat) {
+        columnVisibility = width < 900 ? .doubleColumn : .all
     }
 
     @ViewBuilder

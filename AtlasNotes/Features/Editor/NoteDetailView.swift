@@ -22,7 +22,7 @@ struct NoteDetailView: View {
             .padding(.horizontal, 36)
             .padding(.vertical, 30)
             .frame(maxWidth: 840, alignment: .leading)
-            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(AppTheme.paper.ignoresSafeArea())
         .onChange(of: draft) { _, newValue in

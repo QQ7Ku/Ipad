@@ -11,7 +11,6 @@ fi
 ARCHIVE_PATH="$1"
 OUT_DIR="$2"
 APP_PATH="$ARCHIVE_PATH/Products/Applications/AtlasNotes.app"
-IPA_PATH="$OUT_DIR/AtlasNotes-unsigned.ipa"
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "error: app not found at $APP_PATH" >&2
@@ -20,6 +19,8 @@ if [[ ! -d "$APP_PATH" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
+OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+IPA_PATH="$OUT_DIR/AtlasNotes-unsigned.ipa"
 STAGING_DIR=$(mktemp -d)
 trap 'rm -rf "$STAGING_DIR"' EXIT
 
