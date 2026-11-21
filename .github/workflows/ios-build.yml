@@ -1,0 +1,245 @@
+# Atlas Notes · 未签名 IPA 构建流水线
+#
+# Runner 说明：
+# - 默认使用 GitHub 托管 `macos-15`（Xcode 16.x，可编译 iOS 17 部署目标）。
+# - 手动触发时可在 `runner_label` 输入框直接填 `xcode-27`；
+#   也可在仓库 Settings → Secrets and variables → Actions → Variables 设置
+#       MACOS_RUNNER = xcode-27
+#   两者都为空时回退到 `macos-15`。
+# - 自托管多标签 Runner 请把两个 job 的 runs-on 改为：
+#       runs-on: [self-hosted, macOS, xcode-27]
+# - GitHub 官方托管标签中没有 `xcode-27`；直接写该标签会在排队阶段失败。
+# - 命令行手动指定 Runner：
+#       gh workflow run ios-build.yml -f runner_label=xcode-27
+#
+# 两个独立 job：
+#   ipa       → 未签名 archive → Payload/*.ipa → artifact
+#   previews  → 模拟器构建 → simctl 渲染截图 → artifact
+# 任一 job 失败不会阻止另一个 job 产出证据。
+name: iOS Build (unsigned IPA)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      runner_label:
+        description: "macOS runner 标签（xcode-27 / macos-15；留空则读 MACOS_RUNNER，再回退 macos-15）"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PROJECT: AtlasNotes.xcodeproj
+  SCHEME: AtlasNotes
+  APP_NAME: AtlasNotes
+
+jobs:
+  ipa:
+    name: Unsigned IPA
+    runs-on: ${{ inputs.runner_label || vars.MACOS_RUNNER || 'macos-15' }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+          echo "runner_label=${{ inputs.runner_label || vars.MACOS_RUNNER || 'macos-15' }}"
+          xcrun simctl list runtimes
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate and inspect project
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          export USER="${USER:-$(id -un)}"
+          xcodegen generate --spec project.yml
+          xcodebuild -list -project "$PROJECT" | tee build/project-list.log
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -showBuildSettings 2>/dev/null \
+            | tee build/project-settings.log \
+            | grep -E "PRODUCT_BUNDLE_IDENTIFIER|IPHONEOS_DEPLOYMENT_TARGET|TARGETED_DEVICE_FAMILY|PRODUCT_NAME" \
+            | sort -u
+
+      - name: Archive unsigned device build
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          set -o pipefail
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "build/${APP_NAME}.xcarchive" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" | tee build/archive.log
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          bash scripts/package_unsigned_ipa.sh \
+            "build/${APP_NAME}.xcarchive" \
+            "build"
+          /usr/bin/unzip -l "build/${APP_NAME}-unsigned.ipa" \
+            | grep -q "Payload/${APP_NAME}.app/Info.plist"
+          echo "IPA structure verified: Payload/${APP_NAME}.app/Info.plist"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-unsigned-ipa
+          path: build/${{ env.APP_NAME }}-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-build-logs
+          path: |
+            build/archive.log
+            build/project-list.log
+            build/project-settings.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Atlas Notes · unsigned IPA"
+            echo ""
+            echo "- Job status: \`${{ job.status }}\`"
+            echo "- Runner label: \`${{ inputs.runner_label || vars.MACOS_RUNNER || 'macos-15' }}\`"
+            echo "- Xcode: \`$(xcodebuild -version | tr '\n' ' ')\`"
+            if [[ -f "build/${APP_NAME}-unsigned.ipa" ]]; then
+              echo "- IPA path: \`build/${APP_NAME}-unsigned.ipa\`"
+              echo "- IPA SHA256: \`$(shasum -a 256 "build/${APP_NAME}-unsigned.ipa" | awk '{print $1}')\`"
+              echo "- Artifact: \`${APP_NAME}-unsigned-ipa\`"
+            else
+              echo "- IPA: not produced (check the \`${APP_NAME}-build-logs\` artifact)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  previews:
+    name: Rendered previews
+    runs-on: ${{ inputs.runner_label || vars.MACOS_RUNNER || 'macos-15' }}
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          xcode-select -p
+          echo "runner_label=${{ inputs.runner_label || vars.MACOS_RUNNER || 'macos-15' }}"
+          xcrun simctl list runtimes
+
+      - name: Install XcodeGen
+        run: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen
+          fi
+          xcodegen --version
+
+      - name: Generate and inspect project
+        run: |
+          set -euo pipefail
+          export USER="${USER:-$(id -un)}"
+          xcodegen generate --spec project.yml
+          xcodebuild -list -project "$PROJECT"
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -showBuildSettings 2>/dev/null \
+            | grep -E "PRODUCT_BUNDLE_IDENTIFIER|IPHONEOS_DEPLOYMENT_TARGET|TARGETED_DEVICE_FAMILY|PRODUCT_NAME" \
+            | sort -u
+
+      - name: Build for iPad Simulator
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          set -o pipefail
+          xcodebuild \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath build/DerivedData \
+            build | tee build/simulator-build.log
+
+      - name: Capture rendered previews (PNG)
+        run: |
+          set -euo pipefail
+          bash scripts/capture_screenshots.sh \
+            "build/DerivedData/Build/Products/Debug-iphonesimulator/${APP_NAME}.app" \
+            "build/previews"
+          for screen in library insights settings; do
+            test -s "build/previews/${screen}.png"
+            /usr/bin/sips -g pixelWidth -g pixelHeight "build/previews/${screen}.png"
+          done
+          /usr/bin/file build/previews/*.png
+
+      - name: Upload preview screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-preview-screenshots
+          path: build/previews/*.png
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload preview logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-preview-logs
+          path: |
+            build/simulator-build.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Job summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Atlas Notes · previews"
+            echo ""
+            echo "- Job status: \`${{ job.status }}\`"
+            echo "- Runner label: \`${{ inputs.runner_label || vars.MACOS_RUNNER || 'macos-15' }}\`"
+            echo "- Xcode: \`$(xcodebuild -version | tr '\n' ' ')\`"
+            echo "- Artifact: \`${APP_NAME}-preview-screenshots\`"
+            echo "- Screenshots:"
+            if compgen -G "build/previews/*.png" >/dev/null; then
+              ls -lh build/previews/*.png
+            else
+              echo "  not produced"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

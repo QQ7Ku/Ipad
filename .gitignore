@@ -1,0 +1,9 @@
+.DS_Store
+build/
+DerivedData/
+*.xcarchive
+*.ipa
+*.xcuserstate
+xcuserdata/
+AtlasNotes.xcodeproj/
+AtlasNotes.xcodeproj/project.xcworkspace/xcuserdata/
